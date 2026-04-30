@@ -95,7 +95,10 @@ if menu == "Vehicles":
 
     if action == "View Vehicles":
         rows = vehicles.list_all()
-        st.dataframe(pd.DataFrame(rows), use_container_width=True) if rows else st.info("No vehicles added yet.")
+        if rows:
+            st.dataframe(pd.DataFrame(rows), use_container_width=True)
+        else:
+            st.info("No vehicles added yet.")
 
 if menu == "Inventory":
     action = st.radio("Inventory Action", ["Add Item", "Edit Item", "Search Inventory"], horizontal=True)
