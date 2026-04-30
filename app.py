@@ -51,6 +51,12 @@ if menu == "Add Vehicle":
         acquired_at = st.date_input("Acquired Date")
         notes = st.text_area("Notes")
 
+        vehicle_photos = st.file_uploader(
+            "Upload vehicle photos",
+            type=["jpg", "jpeg", "png", "webp"],
+            accept_multiple_files=True,
+        )
+
         submitted = st.form_submit_button("Save Vehicle")
 
     if submitted:
@@ -72,12 +78,36 @@ if menu == "Add Vehicle":
                 "notes": notes,
             }).execute()
 
+            for photo in vehicle_photos:
+                file_path = f"vehicles/{vehicle_clean.lower()}/{photo.name}"
+                file_bytes = photo.getvalue()
+
+                supabase.storage.from_(BUCKET).upload(
+                    file_path,
+                    file_bytes,
+                    {
+                        "content-type": photo.type,
+                        "upsert": "true",
+                    },
+                )
+
+                public_url = supabase.storage.from_(BUCKET).get_public_url(file_path)
+
+                supabase.table("vehicle_photos").insert({
+                    "vehicle_code": vehicle_clean,
+                    "file_path": file_path,
+                    "public_url": public_url,
+                }).execute()
+
             st.success(f"Saved {vehicle_clean}")
+
 
 if menu == "Add Part":
     st.header("Add Part")
 
-    vehicles = supabase.table("vehicles").select("vehicle_code, year, make, model").execute().data
+    vehicles = supabase.table("vehicles").select(
+        "vehicle_code, year, make, model"
+    ).execute().data
 
     vehicle_options = [""] + [
         f"{v['vehicle_code']} — {v.get('year') or ''} {v.get('make') or ''} {v.get('model') or ''}"
@@ -98,8 +128,9 @@ if menu == "Add Part":
         ask_price = st.number_input("Ask Price", min_value=0.0)
         min_price = st.number_input("Minimum Price", min_value=0.0)
         notes = st.text_area("Notes")
+
         photos = st.file_uploader(
-            "Upload photos",
+            "Upload part photos",
             type=["jpg", "jpeg", "png", "webp"],
             accept_multiple_files=True,
         )
@@ -129,7 +160,7 @@ if menu == "Add Part":
             }).execute()
 
             for photo in photos:
-                file_path = f"{sku_clean.lower()}/{photo.name}"
+                file_path = f"parts/{sku_clean.lower()}/{photo.name}"
                 file_bytes = photo.getvalue()
 
                 supabase.storage.from_(BUCKET).upload(
@@ -151,6 +182,7 @@ if menu == "Add Part":
 
             st.success(f"Saved {sku_clean}")
 
+
 if menu == "Search Inventory":
     st.header("Search Inventory")
 
@@ -160,6 +192,9 @@ if menu == "Search Inventory":
         parts = supabase.table("parts").select("*").or_(
             f"sku.ilike.%{search}%,part_name.ilike.%{search}%"
         ).execute().data
+
+        if not parts:
+            st.info("No parts found.")
 
         for part in parts:
             st.subheader(f"{part['sku']} — {part['part_name']}")
@@ -174,6 +209,7 @@ if menu == "Search Inventory":
                 for i, photo in enumerate(photos):
                     cols[i % 4].image(photo["public_url"])
 
+
 if menu == "Build Listing":
     st.header("Build Listing Package")
 
@@ -182,14 +218,21 @@ if menu == "Build Listing":
     if st.button("Build"):
         sku_clean = normalize_sku(sku)
 
-        result = supabase.table("parts").select("*").eq("sku", sku_clean).execute().data
+        result = supabase.table("parts").select("*").eq(
+            "sku", sku_clean
+        ).execute().data
 
         if not result:
             st.error("Part not found.")
         else:
             part = result[0]
 
-            title = f"{part.get('oem_number') or ''} {part['part_name']} {part['condition']} Semi Truck Part".strip()[:80]
+            title = (
+                f"{part.get('oem_number') or ''} "
+                f"{part['part_name']} "
+                f"{part['condition']} "
+                f"Semi Truck Part"
+            ).strip()[:80]
 
             description = f"""
 Part: {part['part_name']}
@@ -240,14 +283,19 @@ Please review photos carefully.
             st.text_area("Title", title)
             st.text_area("Description", description, height=300)
 
+
 if menu == "Log Sale":
     st.header("Log Sale")
 
     with st.form("sale_form"):
         sku = st.text_input("SKU")
-        platform = st.selectbox("Platform", ["eBay", "Facebook Marketplace", "Local", "Other"])
+        platform = st.selectbox(
+            "Platform",
+            ["eBay", "Facebook Marketplace", "Local", "Other"],
+        )
         sold_price = st.number_input("Sold Price", min_value=0.0)
         fees = st.number_input("Fees", min_value=0.0)
+
         submitted = st.form_submit_button("Save Sale")
 
     if submitted:
@@ -266,9 +314,14 @@ if menu == "Log Sale":
             "client_payout": payout,
         }).execute()
 
-        supabase.table("parts").update({"status": "Sold"}).eq("sku", sku_clean).execute()
+        supabase.table("parts").update({"status": "Sold"}).eq(
+            "sku", sku_clean
+        ).execute()
 
-        st.success(f"Commission: ${commission:.2f} | Client payout: ${payout:.2f}")
+        st.success(
+            f"Commission: ${commission:.2f} | Client payout: ${payout:.2f}"
+        )
+
 
 if menu == "Truck Profit":
     st.header("Truck Part-Out Profit Dashboard")
@@ -303,6 +356,7 @@ if menu == "Truck Profit":
                     "part_name": part["part_name"],
                     "sku": part["sku"],
                 })
+
                 total_sales += float(sale.get("sold_price") or 0)
                 total_commission += float(sale.get("commission_amount") or 0)
                 total_client_payout += float(sale.get("client_payout") or 0)
@@ -311,10 +365,22 @@ if menu == "Truck Profit":
         gross_profit = total_sales - purchase_price
 
         with st.expander(
-            f"{vehicle_code} — {vehicle.get('year')} {vehicle.get('make')} {vehicle.get('model')}",
+            f"{vehicle_code} — {vehicle.get('year')} "
+            f"{vehicle.get('make')} {vehicle.get('model')}",
             expanded=False,
         ):
             st.write(vehicle)
+
+            vehicle_photos = supabase.table("vehicle_photos").select("*").eq(
+                "vehicle_code", vehicle_code
+            ).execute().data
+
+            if vehicle_photos:
+                st.subheader("Vehicle Photos")
+                cols = st.columns(4)
+
+                for i, photo in enumerate(vehicle_photos):
+                    cols[i % 4].image(photo["public_url"])
 
             col1, col2, col3, col4 = st.columns(4)
 
